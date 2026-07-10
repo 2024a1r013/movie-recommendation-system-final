@@ -9,32 +9,27 @@ from sklearn.metrics.pairwise import cosine_similarity
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 csv_path = os.path.join(BASE_DIR, 'movies.csv')
 
-# --- 2. Train Model on the Cloud (Runs only once!) ---
+# --- 2. Fast Startup (Load and Vectorize only) ---
 @st.cache_data
-def load_and_train_model():
-    # Load data
+def load_and_prepare_data():
     df = pd.read_csv(csv_path)
     
-    # Fill missing values
     features = ['genres', 'keywords', 'tagline', 'cast', 'director']
     for f in features: 
         df[f] = df[f].fillna('')
         
-    # Advanced Feature Weighting (Director x3, Cast x2)
     df['weighted_director'] = df['director'] + ' ' + df['director'] + ' ' + df['director']
     df['weighted_cast'] = df['cast'] + ' ' + df['cast']
     
     combined = df['genres'] + ' ' + df['keywords'] + ' ' + df['tagline'] + ' ' + df['weighted_cast'] + ' ' + df['weighted_director']
     
-    # Train the "Brain" using the advanced CountVectorizer
+    # We create the vectors, but WE DO NOT calculate the massive similarity matrix here
     vectorizer = CountVectorizer(stop_words='english')
     feature_vectors = vectorizer.fit_transform(combined)
-    sim = cosine_similarity(feature_vectors)
     
-    return df, sim
+    return df, feature_vectors
 
-# Load the trained model into the app
-movies_data, similarity = load_and_train_model()
+movies_data, feature_vectors = load_and_prepare_data()
 list_of_all_titles = movies_data['title'].tolist()
 
 # --- 3. Web Interface ---
@@ -51,9 +46,17 @@ if st.button("Get Recommendations"):
             close_match = matches[0]
             st.success(f"Finding movies similar to: **{close_match}**")
             
+            # Find index of the movie
             index = movies_data[movies_data.title == close_match].index[0]
-            similarity_score = list(enumerate(similarity[index]))
-            sorted_similar_movies = sorted(similarity_score, key=lambda x: x[1], reverse=True)
+            
+            # --- THE MAGIC FIX: ON-DEMAND MATH ---
+            # We only calculate similarity for THIS specific movie. 
+            # This takes milliseconds instead of freezing the server!
+            similarity_score = cosine_similarity(feature_vectors[index], feature_vectors)
+            
+            # Extract scores and sort
+            scores = list(enumerate(similarity_score[0]))
+            sorted_similar_movies = sorted(scores, key=lambda x: x[1], reverse=True)
             
             st.write("### Top 10 Recommendations:")
             for i, movie in enumerate(sorted_similar_movies[1:11], 1):
