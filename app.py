@@ -5,35 +5,66 @@ import difflib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# --- Load Data with absolute path fix ---
-# This ensures it finds the CSV in the same folder as app.py
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(BASE_DIR, 'movies.csv')
-movies_data = pd.read_csv(csv_path)
+# --- Load Data ---
+# Ensure 'movies.csv' is in the same folder as this script
+file_path = 'movies.csv'
 
-# --- Preprocessing ---
-selected_features = ['genres', 'keywords', 'tagline', 'cast', 'director']
-for feature in selected_features:
-    movies_data[feature] = movies_data[feature].fillna('')
+@st.cache_data
+def load_and_process_data():
+    df = pd.read_csv(file_path)
+    
+    # Selecting the features identified in your dataset
+    selected_features = ['genres', 'keywords', 'tagline', 'cast', 'director']
+    
+    # Fill missing values
+    for feature in selected_features:
+        df[feature] = df[feature].fillna('')
+    
+    # Combine features
+    combined_features = (
+        df['genres'] + ' ' + 
+        df['keywords'] + ' ' + 
+        df['tagline'] + ' ' + 
+        df['cast'] + ' ' + 
+        df['director']
+    )
+    
+    # Vectorization
+    vectorizer = TfidfVectorizer()
+    feature_vectors = vectorizer.fit_transform(combined_features)
+    similarity = cosine_similarity(feature_vectors)
+    
+    return df, similarity
 
-combined_features = movies_data['genres'] + ' ' + movies_data['keywords'] + ' ' + \
-                    movies_data['tagline'] + ' ' + movies_data['cast'] + ' ' + movies_data['director']
-
-vectorizer = TfidfVectorizer()
-similarity = cosine_similarity(vectorizer.fit_transform(combined_features))
+# Run loading
+movies_data, similarity = load_and_process_data()
 list_of_all_titles = movies_data['title'].tolist()
 
 # --- Streamlit UI ---
 st.title("🎬 Movie Recommendation System")
-movie_input = st.text_input("Enter a movie name:")
+st.write("Find movies similar to the ones you love.")
 
-if st.button("Recommend"):
-    matches = difflib.get_close_matches(movie_input, list_of_all_titles)
-    if matches:
-        idx = movies_data[movies_data.title == matches[0]].index[0]
-        scores = sorted(list(enumerate(similarity[idx])), key=lambda x: x[1], reverse=True)
-        st.write(f"Because you liked **{matches[0]}**, you might like:")
-        for i, m in enumerate(scores[1:11], 1):
-            st.write(f"{i}. {movies_data.iloc[m[0]]['title']}")
+movie_name = st.text_input("Enter a movie name:")
+
+if st.button("Get Recommendations"):
+    if movie_name:
+        # Find close match
+        find_close_match = difflib.get_close_matches(movie_name, list_of_all_titles)
+        
+        if find_close_match:
+            close_match = find_close_match[0]
+            st.success(f"Finding movies similar to: **{close_match}**")
+            
+            # Find index
+            index = movies_data[movies_data.title == close_match].index[0]
+            similarity_score = list(enumerate(similarity[index]))
+            sorted_similar_movies = sorted(similarity_score, key=lambda x: x[1], reverse=True)
+            
+            # Display results
+            for i, movie in enumerate(sorted_similar_movies[1:11], 1):
+                title = movies_data.iloc[movie[0]]['title']
+                st.write(f"{i}. {title}")
+        else:
+            st.error("Movie not found! Please check spelling.")
     else:
-        st.error("Movie not found!")
+        st.warning("Please enter a movie name.")
